@@ -19,6 +19,30 @@ pthread_mutex_t matchedMutex;
 int8_t finished = -1;
 char *match;
 
+/*  unimplemented struct for eventual use in zmq send/recv
+struct workerDataSend {
+	int numThreads;
+	int wordLength;
+	char startWord[20];
+	char endWord[20];
+	char hash[32];
+};
+
+struct workerDataSend* newDataSender() {
+	struct workerDataSend *newSender = malloc(sizeof(struct workerDataSend));
+	if (newSender == NULL) {
+		return NULL;
+	}
+	return newSender;
+}
+
+void delWorkerData(struct workerDataSend *wDS) {
+	if(wDS != NULL) {
+		free(wDS);
+	}
+}
+*/
+
 struct workerThreadData {
 	int increment;
 	int wordLength;
@@ -177,6 +201,18 @@ int main(void)
 	strcpy(theHash, buff);
 	printf("Recieved hash: \n%s\n", theHash);
 	
+	/*
+	struct workerDataSend *toWork = newDataSender();
+	printf("worker allocated...\n");
+	printf("sizeof toWork: %d\n", sizeof(toWork));
+
+	int result = zmq_recv(receiver, buff, 250, 0);
+	toWork = (struct workerDataSend*) buff;
+	printf("worker received...\n");
+	printf("Recieved hash: \n%s\n", toWork->hash);
+	printf("Recieved start: \n%s\n", toWork->startWord);
+	*/
+
 
 	pthread_cond_init(&checkCondition, NULL);
 	pthread_mutex_init(&matchedMutex, NULL);
