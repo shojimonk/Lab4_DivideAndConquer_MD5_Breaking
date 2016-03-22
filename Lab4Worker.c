@@ -17,7 +17,7 @@ typedef enum { false, true } bool;
 pthread_cond_t checkCondition;
 pthread_mutex_t matchedMutex;
 int8_t finished = -1;
-char *match;
+char *globMatch;
 
 /*  unimplemented struct for eventual use in zmq send/recv
 struct workerDataSend {
@@ -43,6 +43,7 @@ void delWorkerData(struct workerDataSend *wDS) {
 }
 */
 
+/* Struct for storing data to pass to each worker thread */
 struct workerThreadData {
 	int increment;
 	int wordLength;
@@ -52,6 +53,7 @@ struct workerThreadData {
 	int threadID;
 };
 
+/* Recursive method to increment through strings */
 void wordIncrement(char* theWord, int increment, int index) {
 	if ((int)theWord[index] <= (126 - increment)) {
 		theWord[index] += increment;
@@ -64,7 +66,7 @@ void wordIncrement(char* theWord, int increment, int index) {
 	}
 }
 
-// The method run in each thread to loop through the words and check hash results.
+/* The method run in each thread to loop through the words and check hash results. */
 void* workerThread(void* data) {
 	// initialize data
 	//pthread_mutex_lock(&matchedMutex);
@@ -77,7 +79,8 @@ void* workerThread(void* data) {
 	char* currentWord = (char*)malloc(sizeof(char) * strlen(inputs->startWord + 1));
 	strcpy(currentWord, inputs->startWord);
 	char* currentHash;
-	
+
+	int mutRes = 0;
 	int counter = 0;
 
 	wordIncrement(currentWord, inputs->threadID, strlen(currentWord) - 1);	// pre-increment by thread # to prevent all threads running same words.
@@ -100,14 +103,16 @@ void* workerThread(void* data) {
 			if (strcmp(currentHash, inputs->match) == 0) {					// if match has been found.
 				printf("worker '%d' found match.\tword is: \"%s\"\n", inputs->threadID, currentWord);
 				printf("wait lock %d\n", inputs->threadID);
-				pthread_mutex_lock(&matchedMutex);
+				mutRes = pthread_mutex_lock(&matchedMutex);
 				printf("got lock %d\n", inputs->threadID);
 				finished = inputs->threadID;
 				pthread_cond_signal(&checkCondition);
-				strcpy(match, currentWord);
+				strcpy(globMatch, currentWord);
 				free(currentWord);
 				free(currentHash);
-				pthread_mutex_unlock(&matchedMutex);
+				mutRes = pthread_mutex_unlock(&matchedMutex);
+				if (mutRes != 0) printf("error with mutex\n");
+				mutRes = pthread_mutex_unlock(&matchedMutex);
 				printf("release lock %d\n", inputs->threadID);
 				pthread_exit(NULL);
 				// return match somehow
@@ -118,13 +123,15 @@ void* workerThread(void* data) {
 				printf("current word: %s\tend Word: %s\n", currentWord, inputs->endWord);
 				fflush(stdout);
 				printf("wait lock %d\n", inputs->threadID);
-				pthread_mutex_lock(&matchedMutex);
+				mutRes = pthread_mutex_lock(&matchedMutex);
+				if (mutRes != 0) printf("error with mutex\n");
 				printf("got lock %d\n", inputs->threadID);
 				free(currentWord);
 				free(currentHash);
 				finished = inputs->threadID;
 				pthread_cond_signal(&checkCondition);
-				pthread_mutex_unlock(&matchedMutex);
+				mutRes = pthread_mutex_unlock(&matchedMutex);
+				if (mutRes != 0) printf("error with mutex\n");
 				printf("release lock %d\n", inputs->threadID);
 				pthread_exit(NULL);
 			}
@@ -137,25 +144,29 @@ void* workerThread(void* data) {
 			currentHash[0] = '\0';
 			continue;
 		}
-		else printf("..%d.fini is..%d.\n", inputs->threadID, finished);
+		//else printf("..%d.sees finish is.%d.\n", inputs->threadID, finished);
 		break;
 	}
 	printf("wait lock %d\n", inputs->threadID);
-	pthread_mutex_lock(&matchedMutex);
+	mutRes = pthread_mutex_lock(&matchedMutex);
+	if (mutRes != 0) printf("error with mutex\n");
 	printf("got lock %d\n", inputs->threadID);
-	printf("exit%d\t%d\n", inputs->threadID, finished);
+	//printf("exit%d\t%d\n", inputs->threadID, finished);
 	finished = inputs->threadID;
 	pthread_cond_signal(&checkCondition);
-	pthread_mutex_unlock(&matchedMutex);
+	mutRes = pthread_mutex_unlock(&matchedMutex);
+	if (mutRes != 0) printf("error with mutex\n");
+	mutRes = pthread_mutex_unlock(&matchedMutex);
+	if (mutRes != 0) printf("error with mutex\n");
 	printf("release lock %d\n", inputs->threadID);
 	pthread_exit(NULL);
 }
 
-// 
+/* Simple method call to print out errors, if there were any, then exit the program */
 int errCheck(int result) {
 	if (result == -1) {
 		fprintf(stderr, "error reading from file.\n");
-		return EXIT_FAILURE;
+		abort();
 	}
 }
 
@@ -201,7 +212,7 @@ int main(void)
 	strcpy(theHash, buff);
 	printf("Recieved hash: \n%s\n", theHash);
 	
-	/*
+	/*				// non-working attempt to use structs through zmq, instead of char arrays
 	struct workerDataSend *toWork = newDataSender();
 	printf("worker allocated...\n");
 	printf("sizeof toWork: %d\n", sizeof(toWork));
@@ -230,27 +241,30 @@ int main(void)
 		pthread_create(&workers[i], NULL, workerThread, (void *)&threadData[i]);
 	}
 
-	match = (char*)malloc(sizeof(char) * wordLength);
-	// returning results from threads...
+	globMatch = (char*)malloc(sizeof(char) * wordLength);
+	/*	// returning results from threads... not working?
 	for (int threads = numThreads-1; threads > 0; threads--) {
 		pthread_cond_wait(&checkCondition, &matchedMutex);
-		printf("wait lock main\n");
-		pthread_mutex_lock(&matchedMutex);
+		printf("wait lock \tMain\n");
+		int mutRes = pthread_mutex_lock(&matchedMutex);
+		printf("mutex lock Result.%s..%d..\n", "MAIN", mutRes);
 		pthread_join(workers[finished], NULL);
-		if (match != NULL) {
-			finished = 10;
-		}
-		else {
-			printf("match!=null\n");
-			finished = -1;
-		}
+		
 		printf("waiting on: %d\n", threads);
-		pthread_mutex_unlock(&matchedMutex);
+		mutRes = pthread_mutex_unlock(&matchedMutex);
+		printf("mutex unlock Result.%s..%d..\n", "MAIN", mutRes);
+	}*/
+
+	// replacing above:
+	pthread_cond_wait(&checkCondition, &matchedMutex);
+	for (int threads = numThreads - 1; threads > 0; threads--) {
+		printf("waiting on: %d\n", threads);
+		pthread_join(workers[threads], NULL);
 	}
-	
+
 	
 	// sending results to master...
-	zmq_send(sender, "test", 5, 0);
+	zmq_send(sender, globMatch, wordLength+1, 0);
 
 	zmq_close(receiver);
 	zmq_close(sender);
